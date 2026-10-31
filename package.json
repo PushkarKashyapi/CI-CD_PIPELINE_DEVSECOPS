@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
-    "build": "node --check src/server.js && node --check src/app.js"
+    "build": "node --check server.js && node --check app.js"
   },
   "overrides": {
     "deepmerge": "^4.3.1",
