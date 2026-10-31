@@ -150,6 +150,27 @@ jobs:
             exit 1
           fi
 
+        # 5. Start API and Run Automated Scanner Tests
+      - name: Start API server
+        run: |
+          nohup node server.js > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for API server
+        run: |
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/health; then
+              echo "API server is ready."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "API server failed to start."
+          cat server.log
+          exit 1
+
       # 5. Automated Scanner Tests
       - name: Run VibeShield scanner tests
         run: |
