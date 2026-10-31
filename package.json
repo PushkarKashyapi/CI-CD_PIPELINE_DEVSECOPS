@@ -24,7 +24,7 @@
     "vibeshield-nodejs-backend@0.1.0": true
   },
   "devDependencies": {
-    "jest": "^25.1.0",
+    "jest": "^30.5.2",
     "supertest": "^7.0.0"
   }
 }
