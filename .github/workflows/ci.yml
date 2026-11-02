@@ -241,3 +241,109 @@ jobs:
           docker push "${IMAGE_NAME}:${IMAGE_TAG}"
 
           echo "Published image: ${IMAGE_NAME}:${IMAGE_TAG}"
+
+  deploy:
+    name: Deploy to AWS EKS
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+      IMAGE_NAME: ghcr.io/${{ github.repository }}
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Normalize GHCR image name
+        shell: bash
+        run: |
+          IMAGE_NAME="$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_NAME=$IMAGE_NAME" >> "$GITHUB_ENV"
+
+      - name: Authenticate to AWS using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Connect to EKS cluster
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$EKS_CLUSTER_NAME"
+
+      - name: Verify EKS connectivity
+        run: |
+          kubectl get nodes
+          kubectl cluster-info
+
+      - name: Render and apply Kubernetes Deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Deploying image: ${IMAGE_NAME}:${IMAGE_TAG}"
+
+          envsubst < test/scanner/k8s/deployment.yaml > /tmp/vibeshield-deployment.yaml
+
+          # Fail safely if the image variables were not substituted.
+          if grep -Eq '\$\{(IMAGE_NAME|IMAGE_TAG)\}' /tmp/vibeshield-deployment.yaml; then
+            echo "Image variables were not substituted in the Kubernetes manifest."
+            exit 1
+          fi
+
+          kubectl apply -f /tmp/vibeshield-deployment.yaml
+
+      - name: Apply Kubernetes Service
+        run: |
+          kubectl apply -f test/scanner/k8s/service.yaml
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/vibeshield \
+            --timeout=300s
+
+      - name: Display deployment status
+        run: |
+          echo "=== Deployment ==="
+          kubectl get deployment vibeshield
+
+          echo "=== Pods ==="
+          kubectl get pods -l app=vibeshield -o wide
+
+          echo "=== Service ==="
+          kubectl get service vibeshield-service
+
+      - name: Display load balancer hostname
+        shell: bash
+        run: |
+          for i in {1..30}; do
+            HOSTNAME="$(kubectl get service vibeshield-service \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+
+            if [ -n "$HOSTNAME" ]; then
+              echo "Load balancer hostname: $HOSTNAME"
+              echo "Application URL: http://$HOSTNAME"
+              exit 0
+            fi
+
+            echo "Waiting for AWS load balancer provisioning..."
+            sleep 10
+          done
+
+          echo "Load balancer hostname is not available yet."
+          kubectl describe service vibeshield-service
+          exit 1
