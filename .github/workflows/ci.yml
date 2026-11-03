@@ -289,7 +289,7 @@ jobs:
               repository: payload.repository,
               ref: payload.ref
             }, null, 2));
-      #main
+      #mens
       - name: Authenticate to AWS using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
